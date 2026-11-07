@@ -2,25 +2,26 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>轻量全能扫描王 - 网页版Demo</title>
-    <!-- Tailwind CSS -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>闪电扫描王 - 高清文档扫描</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide 图标 -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- jsPDF 用于导出 PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <!-- OpenCV.js 用于图像处理和轮廓检测 -->
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        html, body { -webkit-text-size-adjust: 100%; }
+        body { font-family: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; background-color: #0f172a; color: #f8fafc; overscroll-behavior: none; }
         .tab-content { display: none; }
         .tab-content.active { display: flex; }
+        #crop-canvas, #filter-canvas { display: block; touch-action: none; }
+        #crop-canvas { flex: none; }
+        .busy-mask { position: absolute; inset: 0; background: rgba(2,6,23,.72); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: .75rem; z-index: 30; backdrop-filter: blur(2px); }
+        .spin { width: 34px; height: 34px; border: 3px solid rgba(99,102,241,.25); border-top-color: #6366f1; border-radius: 50%; animation: sp .8s linear infinite; }
+        @keyframes sp { to { transform: rotate(360deg); } }
+        .hidden-imp { display: none !important; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
 
-    <!-- 顶部导航栏 -->
     <header class="bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-50 px-4 py-3 flex items-center justify-between">
         <div class="flex items-center space-x-2">
             <div class="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-500/30">
@@ -28,7 +29,7 @@
             </div>
             <div>
                 <h1 class="font-bold text-lg tracking-tight text-white">闪电扫描王</h1>
-                <p id="opencv-status" class="text-xs text-amber-400">正在加载 OpenCV 引擎...</p>
+                <p id="opencv-status" class="text-xs text-amber-400">正在加载图像引擎...</p>
             </div>
         </div>
         <div class="flex items-center space-x-2">
@@ -42,26 +43,22 @@
         </div>
     </header>
 
-    <!-- 主体容器 -->
     <main class="flex-1 flex flex-col relative overflow-hidden max-w-md mx-auto w-full">
 
-        <!-- 视图 1：首页/相机/上传 -->
         <div id="tab-home" class="tab-content active flex-col flex-1 p-4 justify-center items-center text-center space-y-6">
             <div class="w-32 h-32 rounded-3xl bg-indigo-600/10 border-2 border-dashed border-indigo-500/40 flex items-center justify-center mx-auto text-indigo-400 shadow-inner">
                 <i data-lucide="camera" class="w-16 h-16 animate-pulse"></i>
             </div>
             <div class="space-y-2">
                 <h2 class="text-2xl font-bold tracking-tight text-white">随时随地，智能扫描</h2>
-                <p class="text-sm text-slate-400 max-w-xs mx-auto">自动识别边框、透视矫正、黑白增强，一键生成高清扫描件与 PDF。</p>
+                <p class="text-sm text-slate-400 max-w-xs mx-auto">自动识别边框、透视矫正、300dpi 高清增强，一键生成扫描件与 PDF。</p>
             </div>
 
             <div class="w-full space-y-3 pt-4">
-                <!-- 拍照触发 -->
                 <button onclick="openCamera()" class="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold py-4 px-6 rounded-2xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-3 transition transform active:scale-95">
                     <i data-lucide="camera" class="w-5 h-5"></i>
                     <span>手机拍照扫描</span>
                 </button>
-                <!-- 本地上传触发 -->
                 <label class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-4 px-6 rounded-2xl border border-slate-700 flex items-center justify-center space-x-3 cursor-pointer transition transform active:scale-95">
                     <i data-lucide="image" class="w-5 h-5 text-indigo-400"></i>
                     <span>从相册选择图片</span>
@@ -70,112 +67,109 @@
             </div>
         </div>
 
-        <!-- 隐藏的拍照视频全屏流 -->
-        <div id="camera-modal" class="absolute inset-0 bg-black z-50 flex flex-col justify-between hidden">
-            <div class="p-4 flex justify-between items-center bg-black/40">
+        <div id="camera-modal" class="absolute inset-0 bg-black z-50 flex-col justify-between hidden">
+            <div class="p-4 flex justify-between items-center bg-black/60">
                 <button onclick="closeCamera()" class="text-white p-2 rounded-full bg-slate-800/80">
                     <i data-lucide="x" class="w-6 h-6"></i>
                 </button>
-                <span class="text-sm font-medium text-white">请对准纸张或文档</span>
+                <span class="text-sm font-medium text-white" id="cam-hint">请对准纸张或文档</span>
                 <div class="w-10"></div>
             </div>
             <div class="flex-1 relative flex items-center justify-center overflow-hidden">
-                <video id="video-stream" autoplay playsinline class="w-full h-full object-cover"></video>
-                <!-- 取景框辅助网格 -->
-                <div class="absolute inset-8 border-2 border-indigo-500/60 rounded-xl pointer-events-none flex flex-col justify-between p-2">
-                    <div class="flex justify-between"><div class="w-4 h-4 border-t-2 border-l-2 border-white"></div><div class="w-4 h-4 border-t-2 border-r-2 border-white"></div></div>
-                    <div class="flex justify-between"><div class="w-4 h-4 border-b-2 border-l-2 border-white"></div><div class="w-4 h-4 border-b-2 border-r-2 border-white"></div></div>
+                <video id="video-stream" autoplay playsinline muted class="w-full h-full object-contain"></video>
+                <div class="absolute inset-6 border-2 border-indigo-500/50 rounded-xl pointer-events-none flex flex-col justify-between p-2">
+                    <div class="flex justify-between"><div class="w-5 h-5 border-t-2 border-l-2 border-white/80 rounded-tl"></div><div class="w-5 h-5 border-t-2 border-r-2 border-white/80 rounded-tr"></div></div>
+                    <div class="flex justify-between"><div class="w-5 h-5 border-b-2 border-l-2 border-white/80 rounded-bl"></div><div class="w-5 h-5 border-b-2 border-r-2 border-white/80 rounded-br"></div></div>
                 </div>
             </div>
-            <div class="p-6 bg-black/60 flex justify-center items-center">
+            <div class="p-6 bg-black/70 flex justify-center items-center">
                 <button onclick="takeSnapshot()" class="w-20 h-20 bg-white rounded-full border-4 border-indigo-600 flex items-center justify-center shadow-2xl active:scale-95 transition">
                     <div class="w-16 h-16 bg-indigo-600 rounded-full"></div>
                 </button>
             </div>
         </div>
 
-        <!-- 视图 2：裁剪与边框调整 (Canvas + 互动拖拽点) -->
         <div id="tab-crop" class="tab-content flex-col flex-1 justify-between p-4 bg-slate-950">
             <div class="flex justify-between items-center">
                 <button onclick="switchTab('home')" class="text-sm text-slate-400 hover:text-white flex items-center space-x-1">
                     <i data-lucide="chevron-left" class="w-4 h-4"></i><span>重选</span>
                 </button>
                 <h3 class="font-bold text-white text-sm">调整边框定位</h3>
-                <button onclick="autoDetectCorners()" class="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-3 py-1 rounded-full font-medium">智能识别</button>
+                <button onclick="autoDetectCorners(false)" id="btn-detect" class="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-3 py-1 rounded-full font-medium active:scale-95 transition">智能识别</button>
             </div>
 
-            <!-- 画布展示区 -->
-            <div class="flex-1 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800">
-                <canvas id="crop-canvas" class="max-w-full max-h-full object-contain cursor-crosshair touch-none"></canvas>
+            <div class="flex-1 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800" id="crop-stage">
+                <canvas id="crop-canvas" class="cursor-crosshair"></canvas>
+                <div id="crop-busy" class="busy-mask hidden-imp">
+                    <div class="spin"></div>
+                    <span class="text-xs text-slate-300">正在识别边缘…</span>
+                </div>
             </div>
 
             <div class="space-y-3">
-                <p class="text-xs text-slate-400 text-center">拖拽四个角的白点以精确对齐文档边缘</p>
-                <button onclick="applyWarpPerspective()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition">
+                <p class="text-xs text-slate-400 text-center">拖拽四个角对齐文档边缘，或点「智能识别」自动定位</p>
+                <button onclick="applyWarpPerspective()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition active:scale-95">
                     <span>下一步：滤镜与增强</span>
                     <i data-lucide="arrow-right" class="w-4 h-4"></i>
                 </button>
             </div>
         </div>
 
-        <!-- 视图 3：滤镜增强与调校 -->
         <div id="tab-filter" class="tab-content flex-col flex-1 justify-between p-4 bg-slate-950">
             <div class="flex justify-between items-center">
                 <button onclick="switchTab('crop')" class="text-sm text-slate-400 hover:text-white flex items-center space-x-1">
                     <i data-lucide="chevron-left" class="w-4 h-4"></i><span>上一步</span>
                 </button>
                 <h3 class="font-bold text-white text-sm">图像增强与处理</h3>
-                <div class="w-10"></div>
+                <span id="filter-size" class="text-[10px] text-slate-500 w-20 text-right"></span>
             </div>
 
-            <!-- 处理后预览图 -->
-            <div class="flex-1 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800">
-                <canvas id="filter-canvas" class="max-w-full max-h-full object-contain"></canvas>
+            <div class="flex-1 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800" id="filter-stage">
+                <canvas id="filter-canvas" style="max-width:100%;max-height:100%;"></canvas>
+                <div id="filter-busy" class="busy-mask hidden-imp">
+                    <div class="spin"></div>
+                    <span class="text-xs text-slate-300">正在增强图像…</span>
+                </div>
             </div>
 
-            <!-- 滤镜选项切换栏 -->
             <div class="space-y-3">
                 <div class="grid grid-cols-4 gap-2">
-                    <button onclick="setFilter('magic')" id="btn-filter-magic" class="flex flex-col items-center p-2 rounded-xl bg-indigo-600 text-white text-xs space-y-1 transition border border-indigo-500">
+                    <button onclick="setFilter('magic')" data-f="magic" class="flex flex-col items-center p-2 rounded-xl bg-indigo-600 text-white text-xs space-y-1 transition border border-indigo-500">
                         <i data-lucide="sparkles" class="w-4 h-4"></i><span>增亮黑白</span>
                     </button>
-                    <button onclick="setFilter('bw')" id="btn-filter-bw" class="flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700">
+                    <button onclick="setFilter('bw')" data-f="bw" class="flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700">
                         <i data-lucide="file-text" class="w-4 h-4"></i><span>纯黑白</span>
                     </button>
-                    <button onclick="setFilter('gray')" id="btn-filter-gray" class="flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700">
+                    <button onclick="setFilter('gray')" data-f="gray" class="flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700">
                         <i data-lucide="moon" class="w-4 h-4"></i><span>灰度</span>
                     </button>
-                    <button onclick="setFilter('original')" id="btn-filter-original" class="flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700">
+                    <button onclick="setFilter('original')" data-f="original" class="flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700">
                         <i data-lucide="image" class="w-4 h-4"></i><span>原图</span>
                     </button>
                 </div>
 
-                <button onclick="saveCurrentScan()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-2 transition">
+                <button onclick="saveCurrentScan()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-2 transition active:scale-95">
                     <i data-lucide="check" class="w-5 h-5"></i>
                     <span>保存并加入文档</span>
                 </button>
             </div>
         </div>
 
-        <!-- 视图 4：文档库与导出 -->
         <div id="tab-docs" class="tab-content flex-col flex-1 justify-between p-4 bg-slate-900">
             <div class="flex justify-between items-center">
                 <h3 class="font-bold text-white text-base">扫描文档列表 (<span id="doc-count">0</span>)</h3>
                 <button onclick="clearAllDocs()" class="text-xs text-rose-400 hover:text-rose-300">清空全部</button>
             </div>
 
-            <!-- 文档列表缩略图区域 -->
             <div id="doc-list-container" class="flex-1 my-3 overflow-y-auto space-y-3 pr-1">
-                <!-- 动态填充 -->
                 <div id="empty-docs" class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
                     <i data-lucide="folder-open" class="w-12 h-12 stroke-1"></i>
                     <p class="text-sm">暂无扫描件，请先拍照或上传</p>
                 </div>
             </div>
 
-            <!-- 批量导出按钮 -->
             <div class="space-y-2 pt-2 border-t border-slate-800">
-                <button onclick="exportAsPDF()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition">
+                <button onclick="exportAsPDF()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition active:scale-95">
                     <i data-lucide="file-down" class="w-5 h-5"></i>
                     <span>导出为多页 PDF 文档</span>
                 </button>
@@ -187,537 +181,1047 @@
 
     </main>
 
-    <!-- 底部状态栏或版权 -->
     <footer class="text-center py-2 text-[10px] text-slate-500 border-t border-slate-900 bg-slate-950">
-        纯前端浏览器运行 · 零服务器存储隐私安全
+        纯前端运行 · 图片不上传 · 隐私安全
     </footer>
 
-    <!-- 全局轻量提示框 -->
-    <div id="toast" class="fixed bottom-16 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-full text-xs shadow-2xl border border-slate-700 transition-all duration-300 opacity-0 pointer-events-none z-50">
+    <div id="toast" class="fixed bottom-16 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-full text-xs shadow-2xl border border-slate-700 transition-all duration-300 opacity-0 pointer-events-none z-50 max-w-[85vw] text-center">
         提示信息
     </div>
 
-    <!-- 核心逻辑脚本 -->
     <script>
-        // 初始化 Lucide 图标
-        lucide.createIcons();
+    'use strict';
 
-        let isOpenCvReady = false;
-        let activeTab = 'home';
-        let scannedDocs = []; // 存储所有扫描完的图片数据 (Base64)
-        
-        // 核心图像工作流变量
-        let sourceImage = new Image();
-        let corners = []; // 四个角顶点 [{x, y}, ...]
-        let draggingPointIndex = null;
-        let currentFilterType = 'magic';
-        let processedCanvasDataUrl = '';
+    /* ==========================================================
+     *  状态
+     * ========================================================== */
+    let cvReady = false;
+    let activeTab = 'home';
 
-        function onOpenCvReady() {
-            isOpenCvReady = true;
-            document.getElementById('opencv-status').innerText = 'OpenCV 引擎就绪';
-            document.getElementById('opencv-status').classList.remove('text-amber-400');
-            document.getElementById('opencv-status').classList.add('text-emerald-400');
-        }
+    let sourceCanvas = null;          // 源图（全分辨率，内存态，不做任何编码）
+    let sourceW = 0, sourceH = 0;
+    let corners = [];                 // 原图坐标系下的 4 个角
+    let draggingIndex = -1;
 
-        // 切换视图 Tab
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.getElementById('tab-' + tabId).classList.add('active');
-            activeTab = tabId;
-            lucide.createIcons();
-            if(tabId === 'docs') {
-                renderDocList();
+    let warpCanvas = null;            // 透视校正结果（内存态）
+    let filterCanvasEl = null, filterCtx = null;
+
+    let displayCanvas = null, displayCtx = null, baseDisplay = null;
+    let scaleRatio = 1;
+
+    let currentFilter = 'magic';
+    let scannedDocs = [];             // [{ blob, url, w, h }]
+    let mediaStream = null;
+
+    /* ==========================================================
+     *  OpenCV 动态加载
+     * ========================================================== */
+    function setCvStatus(text, isError) {
+        const el = document.getElementById('opencv-status');
+        if (!el) return;
+        el.innerText = text;
+        el.className = 'text-xs ' + (isError ? 'text-rose-400' : 'text-emerald-400');
+    }
+
+    function onOpenCvReady() {
+        if (cvReady) return;
+        cvReady = true;
+        setCvStatus('高清引擎就绪');
+        if (sourceCanvas && activeTab === 'crop') autoDetectCorners(true);
+    }
+
+    function checkCvReady() {
+        return (typeof cv !== 'undefined' && cv && cv.Mat) ? (onOpenCvReady(), true) : false;
+    }
+
+    function loadOpenCV() {
+        if (checkCvReady()) return;
+        const s = document.createElement('script');
+        s.src = 'https://docs.opencv.org/4.8.0/opencv.js';
+        s.async = true;
+        s.onload = function () {
+            if (checkCvReady()) return;
+            if (typeof cv !== 'undefined' && cv) {
+                try { cv.onRuntimeInitialized = onOpenCvReady; } catch (e) {}
             }
-        }
+            let tries = 0;
+            const timer = setInterval(() => {
+                if (checkCvReady() || ++tries > 150) {
+                    clearInterval(timer);
+                    if (!cvReady) setCvStatus('引擎加载超时，仅支持基础裁剪', true);
+                }
+            }, 200);
+        };
+        s.onerror = function () { setCvStatus('引擎加载失败，仅支持基础裁剪', true); };
+        document.head.appendChild(s);
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.innerText = msg;
-            toast.classList.remove('opacity-0', 'pointer-events-none');
-            setTimeout(() => {
-                toast.classList.add('opacity-0', 'pointer-events-none');
-            }, 2500);
-        }
+        setTimeout(() => { if (!cvReady) setCvStatus('引擎加载较慢，请稍候…', true); }, 12000);
+    }
 
-        // 1. 拍照相关
-        let mediaStream = null;
-        async function openCamera() {
-            const modal = document.getElementById('camera-modal');
-            modal.classList.remove('hidden');
+    /* ==========================================================
+     *  Mat 生命周期管理（防泄漏 / 防重复 delete）
+     * ========================================================== */
+    let _mats = [];
+    function M(m) { if (!_mats.includes(m)) _mats.push(m); return m; }
+    function freeMats() {
+        for (const m of _mats) { try { m.delete(); } catch (e) {} }
+        _mats = [];
+    }
+
+    /* ==========================================================
+     *  工具
+     * ========================================================== */
+    function showToast(msg, ms) {
+        const t = document.getElementById('toast');
+        t.innerText = msg;
+        t.classList.remove('opacity-0', 'pointer-events-none');
+        clearTimeout(t._h);
+        t._h = setTimeout(() => t.classList.add('opacity-0', 'pointer-events-none'), ms || 2400);
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        const el = document.getElementById('tab-' + tabId);
+        if (el) el.classList.add('active');
+        activeTab = tabId;
+        if (window.lucide) lucide.createIcons();
+        if (tabId === 'docs') renderDocList();
+    }
+
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+    function shoelace(pts) {
+        let a = 0;
+        for (let i = 0; i < pts.length; i++) {
+            const p = pts[i], q = pts[(i + 1) % pts.length];
+            a += p.x * q.y - q.x * p.y;
+        }
+        return a / 2;
+    }
+
+    function setBusy(id, on) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (on) el.classList.remove('hidden-imp'); else el.classList.add('hidden-imp');
+    }
+
+    /* ==========================================================
+     *  1. 采集
+     * ========================================================== */
+    async function openCamera() {
+        const modal = document.getElementById('camera-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 3840 },
+                    height: { ideal: 2160 }
+                },
+                audio: false
+            });
+            const track = mediaStream.getVideoTracks()[0];
+            // 尽量拿到更高分辨率；拿不到就用默认，别报错
             try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, 
-                    audio: false 
+                await track.applyConstraints({
+                    width: { ideal: 3840 }, height: { ideal: 2160 },
+                    advanced: [{ focusMode: 'continuous' }]
                 });
-                document.getElementById('video-stream').srcObject = mediaStream;
-            } catch (err) {
-                modal.classList.add('hidden');
-                showToast('无法访问相机权限，请尝试从相册上传');
-                console.error(err);
-            }
-        }
+            } catch (e) { /* 部分设备不支持，忽略 */ }
 
-        function closeCamera() {
-            const modal = document.getElementById('camera-modal');
+            const v = document.getElementById('video-stream');
+            v.srcObject = mediaStream;
+
+            const st = track.getSettings ? track.getSettings() : {};
+            document.getElementById('cam-hint').innerText =
+                '请对准文档' + (st.width ? ' · ' + st.width + '×' + st.height : '');
+        } catch (err) {
             modal.classList.add('hidden');
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
-                mediaStream = null;
+            modal.classList.remove('flex');
+            showToast('无法访问相机，请改用相册上传');
+        }
+    }
+
+    function closeCamera() {
+        const modal = document.getElementById('camera-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(t => t.stop());
+            mediaStream = null;
+        }
+    }
+
+    async function takeSnapshot() {
+        const video = document.getElementById('video-stream');
+        if (!video.videoWidth) { showToast('相机尚未就绪'); return; }
+
+        setBusy('crop-busy', true);
+        let frame = null;
+        try {
+            // 关键：先抓帧再停流，且不经过任何编码
+            if (window.createImageBitmap) {
+                frame = await createImageBitmap(video);
             }
-        }
-
-        function takeSnapshot() {
-            const video = document.getElementById('video-stream');
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth || 1280;
-            canvas.height = video.videoHeight || 720;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            closeCamera();
-            loadSourceImage(canvas.toDataURL('image/jpeg', 0.9));
-        }
-
-        // 本地相册上传
-        function handleImageUpload(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                loadSourceImage(event.target.result);
+            if (!frame) {
+                const c = document.createElement('canvas');
+                c.width = video.videoWidth; c.height = video.videoHeight;
+                c.getContext('2d').drawImage(video, 0, 0);
+                frame = c;
             }
-            reader.readAsDataURL(file);
-            e.target.value = ''; // 清空选择
+        } catch (e) {
+            const c = document.createElement('canvas');
+            c.width = video.videoWidth; c.height = video.videoHeight;
+            c.getContext('2d').drawImage(video, 0, 0);
+            frame = c;
         }
 
-        // 加载图片并进入裁剪视图
-        function loadSourceImage(dataUrl) {
-            sourceImage.onload = function() {
-                initCorners();
-                switchTab('crop');
-                initCropCanvas();
+        closeCamera();
+        await setSource(frame, frame.width, frame.height);
+        setBusy('crop-busy', false);
+    }
+
+    async function handleImageUpload(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        e.target.value = '';
+
+        setBusy('crop-busy', true);
+        try {
+            let bmp = null;
+            if (window.createImageBitmap) {
+                try {
+                    bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+                } catch (err) {
+                    bmp = await createImageBitmap(file);
+                }
             }
-            sourceImage.src = dataUrl;
-        }
-
-        // 2. 边框智能检测与透视裁剪
-        function initCorners() {
-            const w = sourceImage.width;
-            const h = sourceImage.height;
-            // 默认取图片内部 10% 边距作为初始四个角
-            corners = [
-                { x: w * 0.15, y: h * 0.15 }, // 左上
-                { x: w * 0.85, y: h * 0.15 }, // 右上
-                { x: w * 0.85, y: h * 0.85 }, // 右下
-                { x: w * 0.15, y: h * 0.85 }  // 左下
-            ];
-        }
-
-        // 简易智能边缘检测（利用 OpenCV 查找最大四边形轮廓）
-        function autoDetectCorners() {
-            if (!isOpenCvReady) {
-                showToast('OpenCV 正在加载中，请稍候');
-                return;
+            if (bmp) {
+                await setSource(bmp, bmp.width, bmp.height);
+            } else {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+                await setSource(img, img.naturalWidth, img.naturalHeight);
+                URL.revokeObjectURL(url);
             }
+        } catch (err) {
+            showToast('图片读取失败');
+        } finally {
+            setBusy('crop-busy', false);
+        }
+    }
+
+    async function setSource(drawable, w, h) {
+        sourceW = Math.max(1, Math.round(w));
+        sourceH = Math.max(1, Math.round(h));
+
+        // 源图只存在 canvas 里，全程不做 JPEG 编码
+        sourceCanvas = document.createElement('canvas');
+        sourceCanvas.width = sourceW;
+        sourceCanvas.height = sourceH;
+        const ctx = sourceCanvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(drawable, 0, 0, sourceW, sourceH);
+        if (drawable && typeof drawable.close === 'function') {
+            try { drawable.close(); } catch (e) {}
+        }
+
+        warpCanvas = null;
+        initCorners();
+        switchTab('crop');
+
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            initCropCanvas();
+            if (cvReady) autoDetectCorners(true);
+        }));
+    }
+
+    /* ==========================================================
+     *  2. 角点
+     * ========================================================== */
+    function initCorners() {
+        corners = [
+            { x: sourceW * 0.12, y: sourceH * 0.12 },
+            { x: sourceW * 0.88, y: sourceH * 0.12 },
+            { x: sourceW * 0.88, y: sourceH * 0.88 },
+            { x: sourceW * 0.12, y: sourceH * 0.88 }
+        ];
+    }
+
+    // 极角排序 → 起点旋到最左上 → [TL, TR, BR, BL]
+    function orderCorners(pts) {
+        const n = pts.length;
+        const cx = pts.reduce((s, p) => s + p.x, 0) / n;
+        const cy = pts.reduce((s, p) => s + p.y, 0) / n;
+        const sorted = pts.slice().sort(
+            (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)
+        );
+        let si = 0, best = Infinity;
+        sorted.forEach((p, i) => { const d = p.x + p.y; if (d < best) { best = d; si = i; } });
+        return [...sorted.slice(si), ...sorted.slice(0, si)];
+    }
+
+    function matToPoints(mat) {
+        const out = [];
+        const d = mat.data32S;
+        for (let i = 0; i < mat.rows; i++) out.push({ x: d[i * 2], y: d[i * 2 + 1] });
+        return out;
+    }
+
+    /* ==========================================================
+     *  3. 智能边缘检测（降采样 + 双通道 + 多候选打分）
+     * ========================================================== */
+    function autoDetectCorners(silent) {
+        if (!sourceCanvas) return;
+        if (!cvReady) {
+            if (!silent) showToast('图像引擎加载中，请稍候');
+            return;
+        }
+
+        const btn = document.getElementById('btn-detect');
+        if (btn) btn.disabled = true;
+        setBusy('crop-busy', true);
+
+        // 让 UI 先绘制出来再跑重活
+        setTimeout(() => {
             try {
-                let src = cv.imread(sourceImage);
-                let gray = new cv.Mat();
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-                
-                let edged = new cv.Mat();
-                cv.Canny(gray, edged, 75, 200);
+                const found = detectDocumentQuad();
+                if (found) {
+                    corners = found;
+                    showToast('已自动定位文档边缘');
+                } else if (!silent) {
+                    showToast('未检测到明显边缘，请手动拖拽四角');
+                }
+                drawCropCanvas();
+            } catch (err) {
+                console.error(err);
+                if (!silent) showToast('识别出错，请手动调整');
+            } finally {
+                freeMats();
+                if (btn) btn.disabled = false;
+                setBusy('crop-busy', false);
+            }
+        }, 30);
+    }
 
-                let contours = new cv.MatVector();
-                let hierarchy = new cv.Mat();
-                cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    function detectDocumentQuad() {
+        const DETECT_W = 480;
+        const s = Math.min(1, DETECT_W / sourceW);
+        const dw = Math.max(64, Math.round(sourceW * s));
+        const dh = Math.max(64, Math.round(sourceH * s));
 
-                let maxArea = 0;
-                let bestApprox = null;
+        const smallCv = document.createElement('canvas');
+        smallCv.width = dw; smallCv.height = dh;
+        const sctx = smallCv.getContext('2d');
+        sctx.imageSmoothingQuality = 'high';
+        sctx.drawImage(sourceCanvas, 0, 0, dw, dh);
 
-                for (let i = 0; i < contours.size(); ++i) {
-                    let cnt = contours.get(i);
-                    let area = cv.contourArea(cnt);
-                    let approx = new cv.Mat();
-                    let peri = cv.arcLength(cnt, true);
-                    cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+        const src = M(cv.imread(smallCv));
+        const gray = M(new cv.Mat());
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-                    if (approx.rows === 4 && area > maxArea && cv.isContourConvex(approx)) {
-                        maxArea = area;
-                        bestApprox = approx;
-                    } else {
-                        approx.delete();
-                    }
+        const blur = M(new cv.Mat());
+        cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+
+        // 通道 A：Canny + 闭运算连断边 + 轻度膨胀
+        const edge = M(new cv.Mat());
+        cv.Canny(blur, edge, 50, 150);
+        cv.morphologyEx(edge, edge, cv.MORPH_CLOSE,
+            M(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(7, 7))));
+        cv.dilate(edge, edge,
+            M(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3))));
+
+        // 通道 B：Otsu 亮区（纸比背景亮）→ 最大连通块
+        const paper = M(new cv.Mat());
+        cv.threshold(blur, paper, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+        cv.morphologyEx(paper, paper, cv.MORPH_CLOSE,
+            M(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(9, 9))));
+        cv.morphologyEx(paper, paper, cv.MORPH_OPEN,
+            M(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5))));
+
+        const candidates = [];
+        for (const bin of [edge, paper]) {
+            const contours = M(new cv.MatVector());
+            const hier = M(new cv.Mat());
+            cv.findContours(bin, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            const total = dw * dh;
+            for (let i = 0; i < contours.size(); i++) {
+                const cnt = contours.get(i);
+                try {
+                    const area = cv.contourArea(cnt);
+                    if (area < total * 0.06) continue;
+                    const q = quadFromContour(cnt);
+                    if (q) candidates.push(q);
+                } finally {
                     cnt.delete();
                 }
-
-                if (bestApprox && maxArea > (src.cols * src.rows * 0.05)) {
-                    corners = [
-                        { x: bestApprox.data32S[0], y: bestApprox.data32S[1] },
-                        { x: bestApprox.data32S[2], y: bestApprox.data32S[3] },
-                        { x: bestApprox.data32S[4], y: bestApprox.data32S[5] },
-                        { x: bestApprox.data32S[6], y: bestApprox.data32S[7] }
-                    ];
-                    showToast('智能识别边框成功！');
-                    bestApprox.delete();
-                } else {
-                    showToast('未检测到规整文档边框，已采用默认区域');
-                    initCorners();
-                }
-
-                src.delete(); gray.delete(); edged.delete(); contours.delete(); hierarchy.delete();
-                drawCropCanvas();
-            } catch (err) {
-                console.error(err);
-                showToast('自动识别出错，请手动调整四个角');
             }
         }
 
-        let cropCanvas, cropCtx, scaleRatio = 1;
+        if (!candidates.length) return null;
 
-        function initCropCanvas() {
-            cropCanvas = document.getElementById('crop-canvas');
-            cropCtx = cropCanvas.getContext('2d');
-            
-            // 设定 Canvas 显示尺寸适应容器
-            const container = cropCanvas.parentElement;
-            const maxW = container.clientWidth;
-            const maxH = container.clientHeight;
-            
-            let imgW = sourceImage.width;
-            let imgH = sourceImage.height;
-            
-            scaleRatio = Math.min(maxW / imgW, maxH / imgH);
-            cropCanvas.width = imgW * scaleRatio;
-            cropCanvas.height = imgH * scaleRatio;
+        // 打分选优
+        let best = null, bestScore = -Infinity;
+        for (const q of candidates) {
+            const sc = scoreQuad(q, dw, dh);
+            if (sc > bestScore) { bestScore = sc; best = q; }
+        }
+        if (!best || bestScore <= 0) return null;
 
+        // 坐标还原到原图尺寸
+        const k = 1 / s;
+        return orderCorners(best.map(p => ({ x: p.x * k, y: p.y * k })));
+    }
+
+    function quadFromContour(cnt) {
+        // 1) 直接多边形近似
+        const peri = cv.arcLength(cnt, true);
+        let approx = new cv.Mat();
+        cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+        if (approx.rows === 4) {
+            const p = matToPoints(approx); approx.delete(); return p;
+        }
+        approx.delete();
+
+        // 2) 凸包后再近似（对付锯齿/断裂边缘）
+        const hull = new cv.Mat();
+        cv.convexHull(cnt, hull, false, true);
+        const hullPeri = cv.arcLength(hull, true);
+        approx = new cv.Mat();
+        cv.approxPolyDP(hull, approx, 0.03 * hullPeri, true);
+        let out = null;
+        if (approx.rows === 4) out = matToPoints(approx);
+        approx.delete(); hull.delete();
+        if (out) return out;
+
+        // 3) 最小外接矩形兜底（永远给得出一个四边形）
+        const rect = cv.minAreaRect(cnt);
+        if (rect.size.width < 12 || rect.size.height < 12) return null;
+        const pts = cv.RotatedRect.points(rect);
+        if (!pts || pts.length !== 4) return null;
+        return pts.map(p => ({ x: p.x, y: p.y }));
+    }
+
+    function interiorAnglePenalty(q) {
+        const n = q.length;
+        let sum = 0;
+        for (let i = 0; i < n; i++) {
+            const prev = q[(i - 1 + n) % n], cur = q[i], next = q[(i + 1) % n];
+            const v1 = { x: prev.x - cur.x, y: prev.y - cur.y };
+            const v2 = { x: next.x - cur.x, y: next.y - cur.y };
+            const l1 = Math.hypot(v1.x, v1.y), l2 = Math.hypot(v2.x, v2.y);
+            if (l1 < 1e-6 || l2 < 1e-6) return 1;
+            let cos = (v1.x * v2.x + v1.y * v2.y) / (l1 * l2);
+            cos = Math.max(-1, Math.min(1, cos));
+            const ang = Math.acos(cos) * 180 / Math.PI;
+            sum += Math.min(1, Math.abs(ang - 90) / 90);
+        }
+        return sum / n;
+    }
+
+    function scoreQuad(q, W, H) {
+        if (!q || q.length !== 4) return -1;
+        const area = Math.abs(shoelace(q));
+        const ratio = area / (W * H);
+        if (ratio < 0.1 || ratio > 0.995) return -1;
+
+        // 自交检测
+        if (isSelfIntersecting(q)) return -1;
+
+        let s = Math.min(ratio, 0.85) * 2.4;
+
+        // 长宽比：A4 竖/横 最理想，但只作加分项
+        const sides = [0, 1, 2, 3].map(i => dist(q[i], q[(i + 1) % 4]));
+        const avgW = (sides[0] + sides[2]) / 2;
+        const avgH = (sides[1] + sides[3]) / 2;
+        const ar = Math.max(avgW, avgH) / Math.max(1, Math.min(avgW, avgH));
+        if (ar > 0.9 && ar < 1.9) s += 0.7 * (1 - Math.abs(ar - 1.414) / 1.414);
+
+        // 内角越接近直角越好
+        s += (1 - interiorAnglePenalty(q)) * 0.9;
+
+        // 贴边惩罚：真正框住的文档很少正好压到图像边界
+        let edgeHits = 0;
+        for (const p of q) if (p.x <= 1.5 || p.y <= 1.5 || p.x >= W - 1.5 || p.y >= H - 1.5) edgeHits++;
+        s -= edgeHits * 0.3;
+
+        return s;
+    }
+
+    function isSelfIntersecting(q) {
+        const seg = (a, b, c, d) => {
+            const ccw = (p, qq, r) => (r.y - p.y) * (qq.x - p.x) > (qq.y - p.y) * (r.x - p.x);
+            return ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+        };
+        return seg(q[0], q[1], q[2], q[3]) || seg(q[1], q[2], q[3], q[0]);
+    }
+
+    function isQuadUsable() {
+        if (corners.length !== 4) return false;
+        for (let i = 0; i < 4; i++) {
+            if (dist(corners[i], corners[(i + 1) % 4]) < 24) return false;
+        }
+        if (Math.abs(shoelace(corners)) < 4000) return false;
+        if (isSelfIntersecting(corners)) return false;
+        return true;
+    }
+
+    /* ==========================================================
+     *  4. 裁剪交互
+     * ========================================================== */
+    function initCropCanvas() {
+        displayCanvas = document.getElementById('crop-canvas');
+        if (!displayCanvas) return;
+        displayCtx = displayCanvas.getContext('2d');
+
+        const stage = document.getElementById('crop-stage');
+        const maxW = Math.max(120, stage.clientWidth - 12);
+        const maxH = Math.max(120, stage.clientHeight - 12);
+
+        scaleRatio = Math.min(maxW / sourceW, maxH / sourceH);
+
+        displayCanvas.width = Math.max(1, Math.round(sourceW * scaleRatio));
+        displayCanvas.height = Math.max(1, Math.round(sourceH * scaleRatio));
+        displayCanvas.style.width = displayCanvas.width + 'px';
+        displayCanvas.style.height = displayCanvas.height + 'px';
+
+        // 缓存缩放底图，拖拽时只 blit，不重复缩放 4000px 大图
+        baseDisplay = document.createElement('canvas');
+        baseDisplay.width = displayCanvas.width;
+        baseDisplay.height = displayCanvas.height;
+        const bctx = baseDisplay.getContext('2d');
+        bctx.imageSmoothingEnabled = true;
+        bctx.imageSmoothingQuality = 'high';
+        bctx.drawImage(sourceCanvas, 0, 0, baseDisplay.width, baseDisplay.height);
+
+        drawCropCanvas();
+        setupCropInteractions();
+    }
+
+    function drawCropCanvas() {
+        if (!displayCtx || !baseDisplay) return;
+        const W = displayCanvas.width, H = displayCanvas.height;
+
+        displayCtx.clearRect(0, 0, W, H);
+        displayCtx.drawImage(baseDisplay, 0, 0);
+
+        const pts = corners.map(p => ({ x: p.x * scaleRatio, y: p.y * scaleRatio }));
+
+        // 遮罩（evenodd，四边形不自交也安全）
+        displayCtx.beginPath();
+        displayCtx.rect(0, 0, W, H);
+        displayCtx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < 4; i++) displayCtx.lineTo(pts[i].x, pts[i].y);
+        displayCtx.closePath();
+        displayCtx.fillStyle = 'rgba(2, 6, 23, 0.55)';
+        displayCtx.fill('evenodd');
+
+        // 边框
+        displayCtx.beginPath();
+        displayCtx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < 4; i++) displayCtx.lineTo(pts[i].x, pts[i].y);
+        displayCtx.closePath();
+        displayCtx.strokeStyle = '#818cf8';
+        displayCtx.lineWidth = 2.5;
+        displayCtx.stroke();
+
+        // 顶点
+        const r = Math.max(9, Math.min(W, H) / 26);
+        pts.forEach((p, i) => {
+            displayCtx.beginPath();
+            displayCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            displayCtx.fillStyle = '#ffffff';
+            displayCtx.fill();
+            displayCtx.lineWidth = 3;
+            displayCtx.strokeStyle = draggingIndex === i ? '#f59e0b' : '#6366f1';
+            displayCtx.stroke();
+            // 内点
+            displayCtx.beginPath();
+            displayCtx.arc(p.x, p.y, Math.max(2, r * 0.28), 0, Math.PI * 2);
+            displayCtx.fillStyle = draggingIndex === i ? '#f59e0b' : '#6366f1';
+            displayCtx.fill();
+        });
+    }
+
+    function setupCropInteractions() {
+        if (!displayCanvas) return;
+
+        const toCanvas = (clientX, clientY) => {
+            const rect = displayCanvas.getBoundingClientRect();
+            const sx = displayCanvas.width / rect.width;
+            const sy = displayCanvas.height / rect.height;
+            return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
+        };
+
+        const onDown = (e) => {
+            const t = e.touches ? e.touches[0] : e;
+            const p = toCanvas(t.clientX, t.clientY);
+            const hitR = Math.max(34, Math.min(displayCanvas.width, displayCanvas.height) / 7);
+            let found = -1, bestD = Infinity;
+            for (let i = 0; i < 4; i++) {
+                const d = Math.hypot(p.x - corners[i].x * scaleRatio, p.y - corners[i].y * scaleRatio);
+                if (d < hitR && d < bestD) { bestD = d; found = i; }
+            }
+            if (found >= 0) {
+                draggingIndex = found;
+                if (displayCanvas.setPointerCapture && e.pointerId !== undefined) {
+                    try { displayCanvas.setPointerCapture(e.pointerId); } catch (err) {}
+                }
+                if (e.cancelable) e.preventDefault();
+                drawCropCanvas();
+            }
+        };
+
+        const onMove = (e) => {
+            if (draggingIndex < 0) return;
+            if (e.cancelable) e.preventDefault();
+            const t = e.touches ? e.touches[0] : e;
+            const p = toCanvas(t.clientX, t.clientY);
+            corners[draggingIndex].x = Math.max(0, Math.min(sourceW, p.x / scaleRatio));
+            corners[draggingIndex].y = Math.max(0, Math.min(sourceH, p.y / scaleRatio));
             drawCropCanvas();
-            setupCropInteractions();
+        };
+
+        const onUp = () => {
+            if (draggingIndex >= 0) { draggingIndex = -1; drawCropCanvas(); }
+        };
+
+        if (window.PointerEvent) {
+            displayCanvas.onpointerdown = onDown;
+            displayCanvas.onpointermove = onMove;
+            displayCanvas.onpointerup = onUp;
+            displayCanvas.onpointercancel = onUp;
+        } else {
+            displayCanvas.onmousedown = onDown;
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+            displayCanvas.ontouchstart = onDown;
+            window.addEventListener('touchmove', onMove, { passive: false });
+            window.addEventListener('touchend', onUp);
         }
+    }
 
-        function drawCropCanvas() {
-            cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
-            cropCtx.drawImage(sourceImage, 0, 0, cropCanvas.width, cropCanvas.height);
+    /* ==========================================================
+     *  5. 透视校正（超采样 + 三次插值）
+     * ========================================================== */
+    function applyWarpPerspective() {
+        if (!sourceCanvas) return;
+        if (!cvReady) { showToast('图像引擎未就绪，请稍候'); return; }
+        if (!isQuadUsable()) { showToast('四角位置异常（重叠或交叉），请调整'); return; }
 
-            // 绘制四个角连接线
-            cropCtx.beginPath();
-            cropCtx.moveTo(corners[0].x * scaleRatio, corners[0].y * scaleRatio);
-            for(let i=1; i<4; i++) {
-                cropCtx.lineTo(corners[i].x * scaleRatio, corners[i].y * scaleRatio);
-            }
-            cropCtx.closePath();
-            cropCtx.strokeStyle = '#6366f1';
-            cropCtx.lineWidth = 3;
-            cropCtx.fillStyle = 'rgba(99, 102, 241, 0.15)';
-            cropCtx.fill();
-            cropCtx.stroke();
+        const c = orderCorners(corners);
 
-            // 绘制可拖拽顶点
-            corners.forEach((pt, index) => {
-                cropCtx.beginPath();
-                cropCtx.arc(pt.x * scaleRatio, pt.y * scaleRatio, 14, 0, Math.PI * 2);
-                cropCtx.fillStyle = '#ffffff';
-                cropCtx.shadowColor = 'rgba(0,0,0,0.5)';
-                cropCtx.shadowBlur = 6;
-                cropCtx.fill();
-                cropCtx.lineWidth = 3;
-                cropCtx.strokeStyle = '#6366f1';
-                cropCtx.stroke();
-                cropCtx.shadowBlur = 0; // 重置阴影
-            });
-        }
+        const wA = dist(c[0], c[1]), wB = dist(c[3], c[2]);
+        const hA = dist(c[0], c[3]), hB = dist(c[1], c[2]);
+        let maxW = Math.max(wA, wB);
+        let maxH = Math.max(hA, hB);
 
-        function setupCropInteractions() {
-            const getPos = (e) => {
-                const rect = cropCanvas.getBoundingClientRect();
-                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                return {
-                    x: (clientX - rect.left) / scaleRatio,
-                    y: (clientY - rect.top) / scaleRatio
-                };
-            };
+        // 超采样：目标长边不低于 2600，上限 3600（≈A4@300dpi）
+        const longSide = Math.max(maxW, maxH);
+        const up = Math.max(2, 2600 / Math.max(1, longSide));
+        let outW = Math.round(maxW * up);
+        let outH = Math.round(maxH * up);
+        const MAXDIM = 3600;
+        const over = Math.max(outW, outH) / MAXDIM;
+        if (over > 1) { outW = Math.round(outW / over); outH = Math.round(outH / over); }
+        outW = Math.max(64, outW);
+        outH = Math.max(64, outH);
 
-            const startDrag = (e) => {
-                const pos = getPos(e);
-                // 查找距离哪个控制点最近
-                for (let i = 0; i < 4; i++) {
-                    const dist = Math.hypot(pos.x - corners[i].x, pos.y - corners[i].y);
-                    if (dist < 45 / scaleRatio) { // 响应点击范围
-                        draggingPointIndex = i;
-                        break;
-                    }
-                }
-            };
+        // 先切过去让用户看到进度，再执行重活（warp 在 4000px 图上要几百毫秒）
+        switchTab('filter');
+        setBusy('filter-busy', true);
 
-            const onDrag = (e) => {
-                if (draggingPointIndex === null) return;
-                e.preventDefault();
-                const pos = getPos(e);
-                corners[draggingPointIndex].x = Math.max(0, Math.min(sourceImage.width, pos.x));
-                corners[draggingPointIndex].y = Math.max(0, Math.min(sourceImage.height, pos.y));
-                drawCropCanvas();
-            };
-
-            const endDrag = () => {
-                draggingPointIndex = null;
-            };
-
-            cropCanvas.onmousedown = startDrag;
-            window.onmousemove = onDrag;
-            window.onmouseup = endDrag;
-
-            cropCanvas.ontouchstart = startDrag;
-            window.ontouchmove = onDrag;
-            window.ontouchend = endDrag;
-        }
-
-        // 透视变换与矫正 (Perspective Warp)
-        function applyWarpPerspective() {
-            if (!isOpenCvReady) {
-                // 如果 OpenCV 没准备好，退化采用普通裁剪
-                processFilterDirectly(sourceImage);
-                switchTab('filter');
-                return;
-            }
-
+        setTimeout(() => {
+            const reg = [];
+            const m = (x) => { reg.push(x); return x; };
             try {
-                let src = cv.imread(sourceImage);
-                
-                // 计算目标宽度与高度（基于四边形各边最大长度）
-                let widthA = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
-                let widthB = Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y);
-                let maxWidth = Math.max(widthA, widthB);
+                const src = m(cv.imread(sourceCanvas));
+                const srcTri = m(cv.matFromArray(4, 1, cv.CV_32FC2, [
+                    c[0].x, c[0].y,
+                    c[1].x, c[1].y,
+                    c[2].x, c[2].y,
+                    c[3].x, c[3].y
+                ]));
+                const dstTri = m(cv.matFromArray(4, 1, cv.CV_32FC2, [
+                    0, 0, outW, 0, outW, outH, 0, outH
+                ]));
+                const Mt = m(cv.getPerspectiveTransform(srcTri, dstTri));
+                const dst = m(new cv.Mat());
 
-                let heightA = Math.hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y);
-                let heightB = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
-                let maxHeight = Math.max(heightA, heightB);
+                cv.warpPerspective(
+                    src, dst, Mt, new cv.Size(outW, outH),
+                    cv.INTER_CUBIC, cv.BORDER_REPLICATE, new cv.Scalar()
+                );
 
-                maxWidth = Math.max(maxWidth, 400);
-                maxHeight = Math.max(maxH = maxHeight, 400);
+                warpCanvas = document.createElement('canvas');
+                warpCanvas.width = outW;
+                warpCanvas.height = outH;
+                cv.imshow(warpCanvas, dst);
 
-                let srcTri = cv.matFrommArray ? null : cv.matFromArray(4, 1, cv.CV_32FC2, [
-                    corners[0].x, corners[0].y,
-                    corners[1].x, corners[1].y,
-                    corners[2].x, corners[2].y,
-                    corners[3].x, corners[3].y
-                ]);
+                const label = document.getElementById('filter-size');
+                if (label) label.innerText = outW + '×' + outH;
 
-                let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                    0, 0,
-                    maxWidth, 0,
-                    maxWidth, maxHeight,
-                    0, maxHeight
-                ]);
-
-                let M = cv.getPerspectiveTransform(srcTri, dstTri);
-                let warpedImage = new cv.Mat();
-                let dsize = new cv.Size(maxWidth, maxHeight);
-                cv.warpPerspective(src, warpedImage, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
-
-                // 将矫正后的 Mat 转为 Canvas
-                const outputCanvas = document.createElement('canvas');
-                cv.imshow(outputCanvas, warpedImage);
-                
-                let warpedImgObj = new Image();
-                warpedImgObj.onload = function() {
-                    processFilterDirectly(warpedImgObj);
-                    switchTab('filter');
-                }
-                warpedImgObj.src = outputCanvas.toDataURL('image/jpeg', 0.95);
-
-                src.delete(); srcTri.delete(); dstTri.delete(); M.delete(); warpedImage.delete();
+                renderFilter(currentFilter);
             } catch (err) {
                 console.error(err);
-                showToast('透视变换失败，采用原图继续');
-                processFilterDirectly(sourceImage);
-                switchTab('filter');
+                setBusy('filter-busy', false);
+                showToast('透视变换失败：' + (err && err.message ? err.message : '未知错误'));
+                switchTab('crop');
+            } finally {
+                for (const x of reg) { try { x.delete(); } catch (e) {} }
             }
+        }, 30);
+    }
+
+    /* ==========================================================
+     *  6. 增强滤镜（背景光照归一化 + CLAHE + 保边柔化曲线）
+     * ========================================================== */
+    function setFilter(type) {
+        currentFilter = type;
+        document.querySelectorAll('[data-f]').forEach(btn => {
+            const on = btn.dataset.f === type;
+            btn.className = on
+                ? 'flex flex-col items-center p-2 rounded-xl bg-indigo-600 text-white text-xs space-y-1 transition border border-indigo-500'
+                : 'flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700';
+        });
+        renderFilter(type);
+    }
+
+    let _filterToken = 0;
+
+    function renderFilter(type) {
+        filterCanvasEl = document.getElementById('filter-canvas');
+        if (!filterCanvasEl || !warpCanvas) return;
+        filterCtx = filterCanvasEl.getContext('2d');
+
+        filterCanvasEl.width = warpCanvas.width;
+        filterCanvasEl.height = warpCanvas.height;
+
+        if (type === 'original' || !cvReady) {
+            filterCtx.drawImage(warpCanvas, 0, 0);
+            setBusy('filter-busy', false);
+            return;
         }
 
-        // 3. 图像增强与滤镜处理
-        let currentProcessedImageObj = null;
+        const token = ++_filterToken;
+        setBusy('filter-busy', true);
 
-        function processFilterDirectly(imgObj) {
-            currentProcessedImageObj = imgObj;
-            applySelectedFilter();
-        }
+        // 让浏览器先画出 loading，再执行重活
+        setTimeout(() => {
+            if (token !== _filterToken) return;   // 用户已切到别的滤镜
+            try {
+                enhanceToCanvas(warpCanvas, type, filterCanvasEl);
+            } catch (err) {
+                console.error(err);
+                filterCtx = filterCanvasEl.getContext('2d');
+                filterCanvasEl.width = warpCanvas.width;
+                filterCanvasEl.height = warpCanvas.height;
+                filterCtx.drawImage(warpCanvas, 0, 0);
+                showToast('增强失败，已显示原图');
+            } finally {
+                if (token === _filterToken) setBusy('filter-busy', false);
+            }
+        }, 20);
+    }
 
-        function setFilter(type) {
-            currentFilterType = type;
-            ['magic', 'bw', 'gray', 'original'].forEach(t => {
-                const btn = document.getElementById('btn-filter-' + t);
-                if(t === type) {
-                    btn.className = "flex flex-col items-center p-2 rounded-xl bg-indigo-600 text-white text-xs space-y-1 transition border border-indigo-500";
-                } else {
-                    btn.className = "flex flex-col items-center p-2 rounded-xl bg-slate-800 text-slate-300 text-xs space-y-1 transition border border-slate-700";
+    /**
+     * 增强并直接渲染到目标 canvas。
+     * 所有 cv.Mat 用局部注册表管理，避免连续切换滤镜时与全局表互相误删。
+     */
+    function enhanceToCanvas(srcCanvas, type, targetCanvas) {
+        const reg = [];
+        const m = (x) => { reg.push(x); return x; };
+
+        try {
+            const src = m(cv.imread(srcCanvas));
+            const gray = m(new cv.Mat());
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // ---- 背景光照估计（1/4 降采样做，快且平滑） ----
+            const s4w = Math.max(8, Math.round(gray.cols / 4));
+            const s4h = Math.max(8, Math.round(gray.rows / 4));
+            const tiny = m(new cv.Mat());
+            cv.resize(gray, tiny, new cv.Size(s4w, s4h), 0, 0, cv.INTER_AREA);
+
+            let k = Math.round(Math.min(s4w, s4h) / 10);
+            if (k % 2 === 0) k += 1;
+            k = Math.max(9, Math.min(k, 61));
+
+            const bgTiny = m(new cv.Mat());
+            const kern = m(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(k, k)));
+            cv.morphologyEx(tiny, bgTiny, cv.MORPH_CLOSE, kern);
+
+            // 防除零：在本就极小的图上抬 0→1，放大后仍 ≥1（cv.add 不接受 Scalar）
+            const bd = bgTiny.data;
+            for (let i = 0; i < bd.length; i++) if (bd[i] === 0) bd[i] = 1;
+
+            const bg = m(new cv.Mat());
+            cv.resize(bgTiny, bg, new cv.Size(gray.cols, gray.rows), 0, 0, cv.INTER_LINEAR);
+
+            // ---- 除法归一化：抹平阴影与纸面亮度不均 ----
+            const norm = m(new cv.Mat());
+            cv.divide(gray, bg, norm, 255);
+
+            // ---- 局部对比度（保边），失败则退回全局均衡化 ----
+            try {
+                const clahe = m(new cv.CLAHE(2.0, new cv.Size(8, 8)));
+                clahe.apply(norm, norm);
+            } catch (e) {
+                cv.equalizeHist(norm, norm);
+            }
+
+            // ---- 亮度通道 unsharp：锐化文字，不放大彩色噪点 ----
+            if (type !== 'gray') {
+                const blur = m(new cv.Mat());
+                cv.GaussianBlur(norm, blur, new cv.Size(0, 0), 1.0);
+                cv.addWeighted(norm, 1.5, blur, -0.5, 0, norm);
+            }
+
+            let result = norm;
+
+            if (type === 'magic') {
+                // 平滑 S 曲线：纸面推到纯白，笔画保留过渡灰阶（不硬切）
+                // 注意：部分 opencv.js 构建不含 cv.LUT，直接查表写回 Mat 数据更稳
+                const tbl = new Uint8Array(256);
+                const t = 0.58, gain = 1.22, slope = 10;
+                for (let i = 0; i < 256; i++) {
+                    const x = i / 255;
+                    let v = 1 / (1 + Math.exp(-(x - t) * slope));
+                    v = Math.min(1, v * gain);
+                    tbl[i] = Math.round(v * 255);
                 }
+                const buf = norm.data;
+                for (let i = 0; i < buf.length; i++) buf[i] = tbl[buf[i]];
+
+            } else if (type === 'bw') {
+                // 局部自适应二值化，避免一半过曝一半欠曝
+                const bin = m(new cv.Mat());
+                cv.adaptiveThreshold(
+                    norm, bin, 255,
+                    cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY,
+                    25, 12
+                );
+                result = bin;
+            }
+
+            const rgba = m(new cv.Mat());
+            cv.cvtColor(result, rgba, cv.COLOR_GRAY2RGBA);
+            cv.imshow(targetCanvas, rgba);          // imshow 会写入像素，之后即可释放
+
+        } finally {
+            for (const x of reg) { try { x.delete(); } catch (e) {} }
+        }
+    }
+
+    /* ==========================================================
+     *  7. 文档库（存 PNG Blob，不存 base64）
+     * ========================================================== */
+    function saveCurrentScan() {
+        if (!filterCanvasEl || !filterCanvasEl.width) { showToast('请先完成图像处理'); return; }
+
+        // 唯一一次编码：无损 PNG，文字不做有损压缩
+        filterCanvasEl.toBlob((blob) => {
+            if (!blob) { showToast('保存失败，请重试'); return; }
+            const url = URL.createObjectURL(blob);
+            scannedDocs.push({
+                blob,
+                url,
+                w: filterCanvasEl.width,
+                h: filterCanvasEl.height
             });
-            applySelectedFilter();
-        }
-
-        function applySelectedFilter() {
-            if (!currentProcessedImageObj) return;
-            const canvas = document.getElementById('filter-canvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = currentProcessedImageObj.width;
-            canvas.height = currentProcessedImageObj.height;
-            ctx.drawImage(currentProcessedImageObj, 0, 0);
-
-            if (currentFilterType === 'original') {
-                processedCanvasDataUrl = canvas.toDataURL('image/jpeg', 0.9);
-                return;
-            }
-
-            let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            let data = imgData.data;
-
-            if (currentFilterType === 'gray') {
-                for (let i = 0; i < data.length; i += 4) {
-                    let avg = 0.3 * data[i] + 0.59 * data[i+1] + 0.11 * data[i+2];
-                    data[i] = avg; data[i+1] = avg; data[i+2] = avg;
-                }
-            } else if (currentFilterType === 'bw') {
-                // 纯黑白阈值化
-                for (let i = 0; i < data.length; i += 4) {
-                    let avg = 0.3 * data[i] + 0.59 * data[i+1] + 0.11 * data[i+2];
-                    let v = avg > 145 ? 255 : 0;
-                    data[i] = v; data[i+1] = v; data[i+2] = v;
-                }
-            } else if (currentFilterType === 'magic') {
-                // 增亮扫描模式：提高对比度 + 降噪提白
-                for (let i = 0; i < data.length; i += 4) {
-                    let r = data[i], g = data[i+1], b = data[i+2];
-                    // 简易高对比度白底黑字算法
-                    let gray = 0.3 * r + 0.59 * g + 0.11 * b;
-                    let enhanced = gray < 180 ? gray * 0.75 : 255; // 压暗文字，提亮背景
-                    data[i] = enhanced; data[i+1] = enhanced; data[i+2] = enhanced;
-                }
-            }
-
-            ctx.putImageData(imgData, 0, 0);
-            processedCanvasDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        }
-
-        // 4. 文档管理与导出
-        function saveCurrentScan() {
-            if (!processedCanvasDataUrl) return;
-            scannedDocs.push(processedCanvasDataUrl);
             updateDocBadge();
-            showToast('已成功加入扫描文档库！');
+            showToast('已加入文档库（' + formatSize(blob.size) + '）');
             switchTab('docs');
+        }, 'image/png');
+    }
+
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+        return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    function updateDocBadge() {
+        const badge = document.getElementById('doc-badge');
+        const label = document.getElementById('doc-count');
+        if (label) label.innerText = scannedDocs.length;
+        if (!badge) return;
+        if (scannedDocs.length > 0) {
+            badge.innerText = scannedDocs.length;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
         }
+    }
 
-        function updateDocBadge() {
-            const badge = document.getElementById('doc-badge');
-            const countLabel = document.getElementById('doc-count');
-            countLabel.innerText = scannedDocs.length;
-            if (scannedDocs.length > 0) {
-                badge.innerText = scannedDocs.length;
-                badge.classList.remove('hidden');
-            } else {
-                badge.classList.add('hidden');
-            }
-        }
+    function renderDocList() {
+        const container = document.getElementById('doc-list-container');
+        const emptyEl = document.getElementById('empty-docs');
+        if (!container) return;
 
-        function renderDocList() {
-            const container = document.getElementById('doc-list-container');
-            const emptyEl = document.getElementById('empty-docs');
-            
-            if (scannedDocs.length === 0) {
-                emptyEl.classList.remove('hidden');
-                container.innerHTML = '';
-                container.appendChild(emptyEl);
-                return;
-            }
-
+        if (scannedDocs.length === 0) {
             container.innerHTML = '';
-            scannedDocs.forEach((docUrl, idx) => {
-                const item = document.createElement('div');
-                item.className = "flex items-center justify-between bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl shadow-sm";
-                item.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <img src="${docUrl}" class="w-12 h-16 object-cover rounded-lg border border-slate-700">
-                        <div>
-                            <h4 class="text-xs font-semibold text-white">扫描件 0${idx + 1}</h4>
-                            <p class="text-[10px] text-slate-400">高清彩色/黑白文档</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-1">
-                        <a href="${docUrl}" download="Scan_${idx+1}.jpg" class="p-2 text-slate-400 hover:text-white transition" title="下载单张JPG">
-                            <i data-lucide="download" class="w-4 h-4"></i>
-                        </a>
-                        <button onclick="deleteDoc(${idx})" class="p-2 text-rose-400 hover:text-rose-300 transition" title="删除">
-                            <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        </button>
-                    </div>
-                `;
-                container.appendChild(item);
-            });
-            lucide.createIcons();
-        }
-
-        function deleteDoc(index) {
-            scannedDocs.splice(index, 1);
+            if (emptyEl) {
+                emptyEl.classList.remove('hidden');
+                container.appendChild(emptyEl);
+            }
             updateDocBadge();
-            renderDocList();
-            showToast('已删除该扫描件');
+            if (window.lucide) lucide.createIcons();
+            return;
         }
 
-        function clearAllDocs() {
-            if (confirm('确定清空所有扫描文档吗？')) {
-                scannedDocs = [];
-                updateDocBadge();
-                renderDocList();
-                showToast('已清空');
-            }
-        }
+        container.innerHTML = '';
+        scannedDocs.forEach((doc, idx) => {
+            const item = document.createElement('div');
+            item.className = 'flex items-center justify-between bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl shadow-sm';
 
-        // 导出 PDF (利用 jsPDF)
-        async function exportAsPDF() {
-            if (scannedDocs.length === 0) {
-                showToast('当前没有可导出的扫描文档');
-                return;
-            }
+            const left = document.createElement('div');
+            left.className = 'flex items-center space-x-3 min-w-0';
 
-            showToast('正在生成 PDF 文件...');
+            const img = document.createElement('img');
+            img.src = doc.url;
+            img.className = 'w-12 h-16 object-cover rounded-lg border border-slate-700 bg-white flex-shrink-0';
+            img.alt = '';
+
+            const meta = document.createElement('div');
+            meta.className = 'min-w-0';
+            const h4 = document.createElement('h4');
+            h4.className = 'text-xs font-semibold text-white';
+            h4.innerText = '扫描件 ' + String(idx + 1).padStart(2, '0');
+            const p = document.createElement('p');
+            p.className = 'text-[10px] text-slate-400';
+            p.innerText = doc.w + '×' + doc.h + ' · ' + formatSize(doc.blob.size);
+            meta.appendChild(h4);
+            meta.appendChild(p);
+
+            left.appendChild(img);
+            left.appendChild(meta);
+
+            const right = document.createElement('div');
+            right.className = 'flex items-center space-x-1 flex-shrink-0';
+
+            const a = document.createElement('a');
+            a.href = doc.url;
+            a.download = 'Scan_' + (idx + 1) + '.png';
+            a.className = 'p-2 text-slate-400 hover:text-white transition';
+            a.title = '下载 PNG';
+            a.innerHTML = '<i data-lucide="download" class="w-4 h-4"></i>';
+
+            const del = document.createElement('button');
+            del.className = 'p-2 text-rose-400 hover:text-rose-300 transition';
+            del.title = '删除';
+            del.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4"></i>';
+            del.onclick = () => deleteDoc(idx);
+
+            right.appendChild(a);
+            right.appendChild(del);
+
+            item.appendChild(left);
+            item.appendChild(right);
+            container.appendChild(item);
+        });
+
+        updateDocBadge();
+        if (window.lucide) lucide.createIcons();
+    }
+
+    function deleteDoc(index) {
+        const doc = scannedDocs[index];
+        if (!doc) return;
+        URL.revokeObjectURL(doc.url);
+        scannedDocs.splice(index, 1);
+        updateDocBadge();
+        renderDocList();
+        showToast('已删除该扫描件');
+    }
+
+    function clearAllDocs() {
+        if (!scannedDocs.length) return;
+        if (!confirm('确定清空所有扫描文档吗？')) return;
+        scannedDocs.forEach(d => URL.revokeObjectURL(d.url));
+        scannedDocs = [];
+        updateDocBadge();
+        renderDocList();
+        showToast('已清空');
+    }
+
+    /* ==========================================================
+     *  8. PDF 导出
+     * ========================================================== */
+    function blobToDataURL(blob) {
+        return new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(fr.result);
+            fr.onerror = reject;
+            fr.readAsDataURL(blob);
+        });
+    }
+
+    async function exportAsPDF() {
+        if (!scannedDocs.length) { showToast('当前没有可导出的扫描文档'); return; }
+        if (!window.jspdf || !window.jspdf.jsPDF) { showToast('PDF 组件未加载，请刷新重试'); return; }
+
+        showToast('正在生成 PDF…', 8000);
+        try {
             const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF({
-                orientation: 'portrait',
-                unit: 'mm',
-                format: 'a4'
-            });
-
-            const pageWidth = pdf.internal.pageSize.getWidth();
-            const pageHeight = pdf.internal.pageSize.getHeight();
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const pageW = pdf.internal.pageSize.getWidth();
+            const pageH = pdf.internal.pageSize.getHeight();
+            const margin = 6;
 
             for (let i = 0; i < scannedDocs.length; i++) {
                 if (i > 0) pdf.addPage();
-                
-                // 获取图片宽高比
-                await new Promise((resolve) => {
-                    const img = new Image();
-                    img.src = scannedDocs[i];
-                    img.onload = function() {
-                        let imgWidth = pageWidth;
-                        let imgHeight = (img.height * pageWidth) / img.width;
-                        if (imgHeight > pageHeight) {
-                            imgHeight = pageHeight;
-                            imgWidth = (img.width * pageHeight) / img.height;
-                        }
-                        const x = (pageWidth - imgWidth) / 2;
-                        const y = (pageHeight - imgHeight) / 2;
-                        pdf.addImage(scannedDocs[i], 'JPEG', x, y, imgWidth, imgHeight);
-                        resolve();
-                    }
-                });
+
+                const dataUrl = await blobToDataURL(scannedDocs[i].blob);
+                const doc = scannedDocs[i];
+                const boxW = pageW - margin * 2;
+                const boxH = pageH - margin * 2;
+
+                let w = boxW;
+                let h = (doc.h * boxW) / doc.w;
+                if (h > boxH) { h = boxH; w = (doc.w * boxH) / doc.h; }
+
+                const x = (pageW - w) / 2;
+                const y = (pageH - h) / 2;
+
+                pdf.addImage(dataUrl, 'PNG', x, y, w, h, undefined, 'FAST');
             }
 
-            pdf.save(`扫描全能王_导出_${new Date().toISOString().slice(0,10)}.pdf`);
-            showToast('PDF 导出成功！');
+            const stamp = new Date().toISOString().slice(0, 10);
+            pdf.save('扫描件_' + stamp + '.pdf');
+            showToast('PDF 导出成功');
+        } catch (err) {
+            console.error(err);
+            showToast('PDF 导出失败：' + (err && err.message ? err.message : '未知错误'));
         }
+    }
+
+    /* ==========================================================
+     *  启动
+     * ========================================================== */
+    function boot() {
+        if (window.lucide) lucide.createIcons();
+        loadOpenCV();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+
+    // 只放竖屏 / 旋屏时重排裁剪画布
+    let _rzTimer = null;
+    window.addEventListener('resize', () => {
+        if (activeTab !== 'crop' || !sourceCanvas) return;
+        clearTimeout(_rzTimer);
+        _rzTimer = setTimeout(() => { initCropCanvas(); }, 180);
+    });
+
+    // 防止移动端双指缩放干扰拖拽
+    document.addEventListener('gesturestart', e => e.preventDefault());
     </script>
 </body>
 </html>
