@@ -8,19 +8,73 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
-        html, body { -webkit-text-size-adjust: 100%; }
-        body { font-family: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; background-color: #0f172a; color: #f8fafc; overscroll-behavior: none; }
-        .tab-content { display: none; }
+        html, body { -webkit-text-size-adjust: 100%; height: 100%; }
+        /* 关键：手机横屏时 100vh 会大于真实可见高度（地址栏/工具栏占位），
+           用 dvh 跟随动态视口，并用 overflow:hidden 把溢出交给内部滚动，
+           否则底部操作按钮会被推到屏幕外。 */
+        body {
+            font-family: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background-color: #0f172a; color: #f8fafc; overscroll-behavior: none;
+            height: 100vh;
+            height: 100dvh;
+            min-height: 0;
+            overflow: hidden;
+            padding-left: env(safe-area-inset-left, 0px);
+            padding-right: env(safe-area-inset-right, 0px);
+        }
+        main { min-height: 0; }
+        .tab-content { display: none; min-height: 0; }
         .tab-content.active { display: flex; }
         #crop-canvas, #filter-canvas { display: block; touch-action: none; }
-        #crop-canvas { flex: none; }
+        /* canvas 是替换元素：精确尺寸 + 上限保护，避免撑破 flex 容器 */
+        #crop-canvas { flex: none; max-width: 100%; max-height: 100%; }
+        /* 滤镜画布用绝对定位 + object-fit 适配，绝不能让它参与撑高父容器 */
+        #filter-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
         .busy-mask { position: absolute; inset: 0; background: rgba(2,6,23,.72); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: .75rem; z-index: 30; backdrop-filter: blur(2px); }
         .spin { width: 34px; height: 34px; border: 3px solid rgba(99,102,241,.25); border-top-color: #6366f1; border-radius: 50%; animation: sp .8s linear infinite; }
         @keyframes sp { to { transform: rotate(360deg); } }
         .hidden-imp { display: none !important; }
+
+        /* 横屏 / 短屏：压缩固定区域，保证底部操作按钮始终可见 */
+        @media (orientation: landscape) and (max-height: 660px) {
+            header { padding-top: .35rem; padding-bottom: .35rem; }
+            header h1 { font-size: 1rem; }
+            footer { display: none; }
+            #tab-home > div { padding: .55rem; }
+            #tab-home .w-32 { width: 72px; height: 72px; border-radius: 16px; }
+            #tab-home .w-32 svg { width: 32px; height: 32px; }
+            #tab-home h2 { font-size: 1rem; }
+            #tab-home .space-y-6 > * + * { margin-top: .45rem; }
+            #tab-home .py-4 { padding-top: .55rem; padding-bottom: .55rem; }
+            #tab-home .pt-4 { padding-top: .3rem; }
+            #tab-crop, #tab-filter, #tab-docs { padding: .55rem; }
+            #crop-stage, #filter-stage { margin-top: .35rem; margin-bottom: .35rem; }
+            #crop-hint { display: none; }
+            #tab-crop .space-y-3 > * + *,
+            #tab-filter .space-y-3 > * + * { margin-top: .4rem; }
+            #tab-crop .py-3, #tab-filter .py-3, #tab-docs .py-3 { padding-top: .45rem; padding-bottom: .45rem; }
+            #tab-filter .grid { gap: .3rem; }
+            #tab-filter .grid button { padding: .3rem .1rem; font-size: 10px; }
+            #tab-filter .grid button svg { width: 15px; height: 15px; }
+            #tab-docs .space-y-2 > * + * { margin-top: .3rem; }
+            #camera-modal .p-6 { padding: .45rem; }
+            #camera-modal .w-20 { width: 60px; height: 60px; }
+            #camera-modal .w-16 { width: 48px; height: 48px; }
+        }
+
+        /* 极矮屏（小屏手机横屏，视口高 < 420px）：进一步收紧首页，确保两个入口按钮可见 */
+        @media (orientation: landscape) and (max-height: 420px) {
+            #tab-home .w-32 { width: 54px; height: 54px; border-radius: 14px; }
+            #tab-home .w-32 svg { width: 26px; height: 26px; }
+            #tab-home .space-y-2 > p { display: none; }
+            #tab-home h2 { font-size: .95rem; }
+            #tab-home .py-4 { padding-top: .45rem; padding-bottom: .45rem; }
+            #tab-home .pt-4 { padding-top: 0; }
+            header p { font-size: 10px; }
+        }
     </style>
 </head>
-<body class="min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+<body class="flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
 
     <header class="bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-50 px-4 py-3 flex items-center justify-between">
         <div class="flex items-center space-x-2">
@@ -45,7 +99,8 @@
 
     <main class="flex-1 flex flex-col relative overflow-hidden max-w-md mx-auto w-full">
 
-        <div id="tab-home" class="tab-content active flex-col flex-1 p-4 justify-center items-center text-center space-y-6">
+        <div id="tab-home" class="tab-content active flex-col flex-1 overflow-y-auto">
+          <div class="flex flex-col flex-1 items-center justify-center text-center space-y-6 p-4 w-full">
             <div class="w-32 h-32 rounded-3xl bg-indigo-600/10 border-2 border-dashed border-indigo-500/40 flex items-center justify-center mx-auto text-indigo-400 shadow-inner">
                 <i data-lucide="camera" class="w-16 h-16 animate-pulse"></i>
             </div>
@@ -65,24 +120,25 @@
                     <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
                 </label>
             </div>
+          </div>
         </div>
 
         <div id="camera-modal" class="absolute inset-0 bg-black z-50 flex-col justify-between hidden">
-            <div class="p-4 flex justify-between items-center bg-black/60">
+            <div class="p-4 flex justify-between items-center bg-black/60 shrink-0">
                 <button onclick="closeCamera()" class="text-white p-2 rounded-full bg-slate-800/80">
                     <i data-lucide="x" class="w-6 h-6"></i>
                 </button>
                 <span class="text-sm font-medium text-white" id="cam-hint">请对准纸张或文档</span>
                 <div class="w-10"></div>
             </div>
-            <div class="flex-1 relative flex items-center justify-center overflow-hidden">
+            <div class="flex-1 min-h-0 relative flex items-center justify-center overflow-hidden">
                 <video id="video-stream" autoplay playsinline muted class="w-full h-full object-contain"></video>
                 <div class="absolute inset-6 border-2 border-indigo-500/50 rounded-xl pointer-events-none flex flex-col justify-between p-2">
                     <div class="flex justify-between"><div class="w-5 h-5 border-t-2 border-l-2 border-white/80 rounded-tl"></div><div class="w-5 h-5 border-t-2 border-r-2 border-white/80 rounded-tr"></div></div>
                     <div class="flex justify-between"><div class="w-5 h-5 border-b-2 border-l-2 border-white/80 rounded-bl"></div><div class="w-5 h-5 border-b-2 border-r-2 border-white/80 rounded-br"></div></div>
                 </div>
             </div>
-            <div class="p-6 bg-black/70 flex justify-center items-center">
+            <div class="p-6 bg-black/70 flex justify-center items-center shrink-0">
                 <button onclick="takeSnapshot()" class="w-20 h-20 bg-white rounded-full border-4 border-indigo-600 flex items-center justify-center shadow-2xl active:scale-95 transition">
                     <div class="w-16 h-16 bg-indigo-600 rounded-full"></div>
                 </button>
@@ -90,7 +146,7 @@
         </div>
 
         <div id="tab-crop" class="tab-content flex-col flex-1 justify-between p-4 bg-slate-950">
-            <div class="flex justify-between items-center">
+            <div class="flex justify-between items-center shrink-0">
                 <button onclick="switchTab('home')" class="text-sm text-slate-400 hover:text-white flex items-center space-x-1">
                     <i data-lucide="chevron-left" class="w-4 h-4"></i><span>重选</span>
                 </button>
@@ -98,7 +154,7 @@
                 <button onclick="autoDetectCorners(false)" id="btn-detect" class="text-xs bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-3 py-1 rounded-full font-medium active:scale-95 transition">智能识别</button>
             </div>
 
-            <div class="flex-1 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800" id="crop-stage">
+            <div class="flex-1 min-h-0 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800" id="crop-stage">
                 <canvas id="crop-canvas" class="cursor-crosshair"></canvas>
                 <div id="crop-busy" class="busy-mask hidden-imp">
                     <div class="spin"></div>
@@ -106,8 +162,8 @@
                 </div>
             </div>
 
-            <div class="space-y-3">
-                <p class="text-xs text-slate-400 text-center">拖拽四个角对齐文档边缘，或点「智能识别」自动定位</p>
+            <div class="space-y-3 shrink-0">
+                <p id="crop-hint" class="text-xs text-slate-400 text-center">拖拽四个角对齐文档边缘，或点「智能识别」自动定位</p>
                 <button onclick="applyWarpPerspective()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition active:scale-95">
                     <span>下一步：滤镜与增强</span>
                     <i data-lucide="arrow-right" class="w-4 h-4"></i>
@@ -116,7 +172,7 @@
         </div>
 
         <div id="tab-filter" class="tab-content flex-col flex-1 justify-between p-4 bg-slate-950">
-            <div class="flex justify-between items-center">
+            <div class="flex justify-between items-center shrink-0">
                 <button onclick="switchTab('crop')" class="text-sm text-slate-400 hover:text-white flex items-center space-x-1">
                     <i data-lucide="chevron-left" class="w-4 h-4"></i><span>上一步</span>
                 </button>
@@ -124,15 +180,15 @@
                 <span id="filter-size" class="text-[10px] text-slate-500 w-20 text-right"></span>
             </div>
 
-            <div class="flex-1 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800" id="filter-stage">
-                <canvas id="filter-canvas" style="max-width:100%;max-height:100%;"></canvas>
+            <div class="flex-1 min-h-0 relative my-3 flex items-center justify-center overflow-hidden bg-slate-900 rounded-2xl border border-slate-800" id="filter-stage">
+                <canvas id="filter-canvas"></canvas>
                 <div id="filter-busy" class="busy-mask hidden-imp">
                     <div class="spin"></div>
                     <span class="text-xs text-slate-300">正在增强图像…</span>
                 </div>
             </div>
 
-            <div class="space-y-3">
+            <div class="space-y-3 shrink-0">
                 <div class="grid grid-cols-4 gap-2">
                     <button onclick="setFilter('magic')" data-f="magic" class="flex flex-col items-center p-2 rounded-xl bg-indigo-600 text-white text-xs space-y-1 transition border border-indigo-500">
                         <i data-lucide="sparkles" class="w-4 h-4"></i><span>增亮黑白</span>
@@ -161,14 +217,14 @@
                 <button onclick="clearAllDocs()" class="text-xs text-rose-400 hover:text-rose-300">清空全部</button>
             </div>
 
-            <div id="doc-list-container" class="flex-1 my-3 overflow-y-auto space-y-3 pr-1">
+            <div id="doc-list-container" class="flex-1 min-h-0 my-3 overflow-y-auto space-y-3 pr-1">
                 <div id="empty-docs" class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
                     <i data-lucide="folder-open" class="w-12 h-12 stroke-1"></i>
                     <p class="text-sm">暂无扫描件，请先拍照或上传</p>
                 </div>
             </div>
 
-            <div class="space-y-2 pt-2 border-t border-slate-800">
+            <div class="space-y-2 pt-2 border-t border-slate-800 shrink-0">
                 <button onclick="exportAsPDF()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition active:scale-95">
                     <i data-lucide="file-down" class="w-5 h-5"></i>
                     <span>导出为多页 PDF 文档</span>
@@ -678,8 +734,22 @@
         displayCtx = displayCanvas.getContext('2d');
 
         const stage = document.getElementById('crop-stage');
-        const maxW = Math.max(120, stage.clientWidth - 12);
-        const maxH = Math.max(120, stage.clientHeight - 12);
+        const availW = stage.clientWidth - 12;
+        const availH = stage.clientHeight - 12;
+
+        // 横竖屏切换瞬间容器高度可能还是 0，等一帧再量（最多重试 8 次）
+        if (availW < 40 || availH < 40) {
+            const n = initCropCanvas._retry || 0;
+            if (n < 8) {
+                initCropCanvas._retry = n + 1;
+                setTimeout(initCropCanvas, 60);
+                return;
+            }
+        }
+        initCropCanvas._retry = 0;
+
+        const maxW = Math.max(60, availW);
+        const maxH = Math.max(60, availH);
 
         scaleRatio = Math.min(maxW / sourceW, maxH / sourceH);
 
